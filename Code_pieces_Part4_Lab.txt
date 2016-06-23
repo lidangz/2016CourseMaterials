@@ -1,0 +1,392 @@
+// P476 Modify package.json
+// Open the package.json file with an editor,  and change it so it looks like this: 
+
+"dependencies": {
+    "express": "~3.4.4",
+	"formidable": "~1.0.15",
+	"mime": "~1.2.11",
+	"mongodb": "~1.4.7",
+    "http-client": "~1.0.0"
+  },
+  "devDependencies": {},
+  "bundleDependencies": [],
+  "private": true,
+  "scripts": {
+	"start": "supervisor server.js"
+  },
+  "main": "server.js"
+}
+
+
+//P481 Design an Empty Client-side Html 
+//Replace the contents of index.htm with the following code:
+
+<html>
+    <head>	
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+	  <title>Course material sharer</title>
+	  <script type="text/javascript">
+	  
+	  </script>
+    </head>  
+    <body>
+        <h2>Training Course Material Sharer</h2></p>
+        <div id="catDiv">
+		
+        </div>	
+        <div  id="listDiv">
+		
+        </div>
+        <p> ==============================================
+        <div id="upLoadDivâ€?
+	
+        </div>
+   </body>
+</html>
+
+
+//P482 Server-side Design: server.js
+//Here we start the app, and route the requests to functions in handler.js. 
+//Replace the contents of server.js with the following code:
+
+var express = require('express');
+var handlers = require('./handlers');
+
+var ip_address = process.env.OPENSHIFT_NODEJS_IP || '127.0.0.1';     
+var port      = process.env.OPENSHIFT_NODEJS_PORT || 8080;  
+
+var app = express();
+app.configure(function () {
+    app.use(express.logger('dev'));  
+    app.use(express.bodyParser());
+});
+
+
+//P483 server.js (2)
+//Followed by the code below:
+
+console.log ('registering event routes with express');
+
+app.get('/', handlers.start);
+app.get('/materials', handlers.listAll);
+app.get('/materials/:cat', handlers.listByCat);
+app.post('/materials', handlers.upload);
+app.get('/files/:fileId/:fileName', handlers.download);
+app.delete('/materials/:id', handlers.delete);
+
+console.log ('About to start listening');
+app.listen(port,ip_address);
+console.log('Listening on port: ', port, ' of ', ip_address);
+
+//P484 handlers.js
+//Here we write the logic to handle the requests . Update handlers.js as below:
+
+var fs  = require('fs');
+var mime = require('mime');
+var formidable = require("formidable");
+var mongo = require('mongodb');
+var BSON = mongo.BSONPure;
+var dbutils = require('./dbutils');
+var mongoUrl = dbutils.getMongoUrl();
+
+exports.start = function(req, res) {
+  console.log("Request handler 'start' was called.");   
+  fs.readFile('index.html', 'utf-8', function (err, data) {
+      if (err) {return console.dir(err);}
+      res.setHeader('Content-Type', 'text/html');
+      res.send(data);  	  
+  }); 	  
+} 
+
+// P485 Deal with upload in handlers.js 
+
+exports.upload = function(req,res) {
+     console.log("Request handler 'upload' was called."); 
+  
+     var form = new formidable.IncomingForm();
+     form.parse(req, function(err, fields, files) { 
+	mongo.Db.connect(mongoUrl, function (err, db) {
+		var idobj=new mongo.ObjectID();		
+		var fileId=idobj.toString();		
+		var gridStore = new mongo.GridStore(db, fileId, 'w');
+		gridStore.writeFile(files.upload.path, function(err, fileInfo) {
+			db.collection('material',{safe:true},function(err,collection){  
+				fields["fileName"]=files.upload.name;
+				fields["fileId"]=fileId;
+				collection.insert(fields,{safe:true},function(err,result){	
+					fields["_id"]=result._id;
+					db.close();				
+					res.setHeader('Content-Type', 'text/html');
+					res.send(JSON.stringify(fields));
+				});	  
+			}); 
+		});	
+    });
+  });  
+}
+
+//P486 Functions listAll, listByCat in handlers.js
+
+exports.listAll = function(req, res) {
+     console.log("Request handler â€˜listAll' was called."); 	
+
+     readList(res,null);
+}
+
+exports.listByCat = function(req, res) {
+     console.log("Request handler â€˜listByCat' was called."); 	
+
+    var cat =  req.params.cat;
+    readList(res,cat);
+}
+
+//P487 Function Called by listAll, listByCat
+
+function readList(res,cat) {
+  var qstr = {};
+  if (cat!=null) {
+       qstr=eval('({"fileCat" : "'+ cat +'"})');
+  };	
+
+  mongo.Db.connect(mongoUrl, function (err, db) {
+    db.collection('material', function(err, collection) {
+      collection.find(qstr).toArray(function(err, items) {
+	res.setHeader('Content-Type', 'text/html');
+	res.send(JSON.stringify(items));
+        db.close();
+      });
+    });
+  });
+}
+
+//P488 Deal with download in handlers.js
+
+exports.download = function(req,res) {
+    console.log("Request handler 'download' was called."); 
+  
+    var fileId = req.params.fileId;
+    var fileName = req.params.fileName;	
+    mongo.Db.connect(mongoUrl, function (err, db) {
+	var gridStore = new mongo.GridStore(db, fileId, 'r');
+	gridStore.open(function(err, gridStore) {
+		var stream = gridStore.stream(true);
+		stream.on("end", function(err) {  
+			db.close();
+			res.end();	
+		});
+		var contentType=mime.lookup(fileName).toString();	
+		res.setHeader('Content-Type', contentType);	
+		stream.pipe(res);
+    }); 	
+  }); 
+}
+
+//P489 Deal with delete in handlers.js
+
+exports.delete = function(req, res) {
+  console.log("Request handler 'delete' was called.");
+  var id = req.params.id;
+  mongo.Db.connect(mongoUrl, function (err, db) {
+    db.collection('material', {safe:true}, function(err, collection) {
+        collection.findOne({'_id':new BSON.ObjectID(id)}, function(err, doc) {
+               var fileName=doc.fileName;
+               collection.remove({'_id':new BSON.ObjectID(id)}, {safe:true}, function(err, result) {
+	if (doc.fileId) {						
+	      var gridStore=mongo.GridStore; 
+	      gridStore.unlink(db, doc.fileId, function(err) { 
+	             console.log('delete '+fileName);	
+	            db.close();
+	            readList(res,null);							      
+	      }); 
+	 } else {   db.close();
+	                readList(res,null); 
+	};				
+               });	
+       });	
+    });
+  });
+}
+
+//P490 Add the Follows to dbutils.js
+
+var mongostr = {                			 // local machine
+		"hostname":"localhost", 
+		"port":27017, 
+		"username":â€œtom", 
+		"password":"1234",  
+		"name":"", 
+		"db":"course" 
+}
+if(process.env.OPENSHIFT_NODEJS_PORT){   	// OpenShift
+	mongostr = { 
+		"hostname":process.env.OPENSHIFT_MONGODB_DB_HOST, 
+		"port":process.env.OPENSHIFT_MONGODB_DB_PORT, 
+		"username":process.env.OPENSHIFT_MONGODB_DB_USERNAME, 
+		"password": process.env.OPENSHIFT_MONGODB_DB_PASSWORD,  
+		"name":"", 
+		"db":"mycourse" 
+	}
+}
+exports.getMongoUrl = function() {
+     return "mongodb://" + mongostr.username + ":" + 
+			mongostr.password + "@" + mongostr.hostname + ":" 
+			+ mongostr.port + "/" + mongostr.db; 
+}
+
+//P492 Client-side Design Upload in index.html
+// Replace the uploadDiv by :
+
+<div id="upLoadDiv">
+  <fieldset><legend>Select a file to upload:</legend>
+   <p>File Cat:  
+   <select size="1" id="fileCat">
+		<option selected>Slide</option>
+		<option>Book</option>
+		<option>Program</option>
+		<option>Tool</option>
+   </select> </p>
+   <p>File Desc. : <input type="text" id="fileDesc" size="40"> </p> 
+   <p>Select File: <input type="file" id="upload"></p>	
+   <p><input type="button" value="Upload File" onclick="uploadFile()â€?>
+    </p>	 
+ </fieldset>	 
+</div>
+
+//P493 Design Upload in index.html (2)
+//Add function uploadFile to the script section:
+
+function uploadFile(){	   
+    var urlstr = "/materials";		 
+    var fileObj = document.getElementById("upload").files[0];            
+    var fileName=document.getElementById("upload").value;
+    var fileDesc=document.getElementById("fileDesc").value;   	
+    var fileCat=document.getElementById("fileCat").value; 		 
+       
+    if (validate(fileName,fileDesc)){      	     
+	var form = new FormData();
+	form.append("fileDesc", fileDesc);  
+	form.append("fileCat", fileCat); 
+	form.append("fileName", document.getElementById("upload").value);      
+	form.append("upload", fileObj); 
+	
+//P494 Design Upload in index.html (3)
+// Second part of  function uploadFile:
+
+xmlhttp =  new XMLHttpRequest();		 
+	xmlhttp.open("post", urlstr, true);
+	xmlhttp.setRequestHeader("Content-type", "multipart/form-data");
+        xmlhttp.onreadystatechange = function(){
+    	 if(xmlhttp.readyState === 4){
+       	  if(xmlhttp.status === 200){
+	     var json = JSON.parse(xmlhttp.responseText);				     
+                       var ihtm = getOneLi(json);				
+   	     document.getElementById("listDiv").innerHTML += ihtm;
+    	     document.getElementById("upload").value =null;
+               fileDesc=document.getElementById("fileDesc").value=null; 
+           }else{
+               alert('Error: '+xmlhttp.status); 
+   	  }
+         }  
+        }
+       xmlhttp.send(form);
+     }
+} 
+
+//P495 Design Upload in index.html (4)
+//Two more functions to the script section:
+
+function validate(fileName, fileDesc) {
+	if (fileName == null || fileName =="") {
+        	     alert("Please select a file to upload.");
+             return false;
+  	}   
+    if (fileDesc == null || fileDesc =="") {
+        alert("Please input the file description.");
+        return false;
+    } 
+    return true;
+}
+
+function getOneLi(json) {
+	var fpath= '/files/'+json["fileId"]+'/'+json["fileName"];		
+	var str='<li><u><a onclick="listAll(\''+json["fileCat"]+'\')">'+ 
+		json["fileCat"]+'</a></u> :&nbsp; <a href="'+fpath+'">'+
+		json["fileDesc"]+ '&nbsp;('+json["fileName"]+')</a> &nbsp;'+
+		'<a onclick="delItem(\''+json["_id"]+'\',\''+json["fileName"]+
+		'\')">[delete]</a></li>';	
+	return str;					
+}
+
+//P496 Design List in index.html
+// Replace the catDiv by :
+
+	<div id="catDiv">
+	   <u><a onclick="listAll(null)">All </a></u>
+	</div>
+
+//Add event to the body:
+
+<body onload="listAll(null)">
+	
+//P497 Design List in index.html (2)
+//Add function listAll to the script section:
+
+function listAll(cat){
+    var urlstr = "/materials"; 
+    if (cat!=null && cat !='') {
+	urlstr = urlstr+"/"+cat;  
+    }
+    xmlhttp =  new XMLHttpRequest();		 
+    xmlhttp.open("get", urlstr, true);	
+    xmlhttp.onreadystatechange = function(){
+	if(xmlhttp.readyState === 4){
+	   if(xmlhttp.status === 200){
+		showItems(xmlhttp.responseText,cat);
+	   }else{
+		alert('Error: '+xmlhttp.responseText); // An error occurred
+	   }
+	}	
+   };
+   xmlhttp.send(null);
+} 
+
+//P498 Design List in index.html (3)
+//Add function showItems to the script section:
+
+function showItems(jsontxt,cat) {
+   var alljson = JSON.parse(jsontxt); 
+   var ihtm ='<ul>';	
+   for(var i=0;i<alljson.length;i++){
+	ihtm += getOneLi(alljson[i]);
+   }
+   var titlelstr='<u><a onclick="listAll(null)">All</a></u>';
+   if (cat!=null && cat !='') {
+	titlelstr += '<u>-->'+cat+'</ul>';				
+   }	
+		
+   document.getElementById("listDiv").innerHTML=ihtm+'</ul>';
+   document.getElementById("catDiv").innerHTML=titlelstr;
+}
+
+
+
+//P499 Delete in index.html 
+//Add function delItem to the script section:
+
+function delItem(mid, fileName) {	
+	if(confirm('Do you want to delete file '+ fileName +' ?')){
+		var urlstr = '/materials'+'/'+mid; 
+		xmlhttp =  new XMLHttpRequest();		 
+		xmlhttp.open("delete", urlstr, true);
+		xmlhttp.send();
+		xmlhttp.onreadystatechange = function(){
+			if(xmlhttp.readyState === 4){
+				if(xmlhttp.status === 200){
+					showItems(xmlhttp.responseText,null);
+				} else {
+					alert('Error: '+xmlhttp.responseText); 	
+				}		
+			}
+		}
+	};
+}
