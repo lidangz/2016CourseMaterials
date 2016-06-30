@@ -38,7 +38,7 @@
 		
         </div>
         <p> ==============================================
-        <div id="upLoadDivâ€?
+        <div id="upLoadDiv">
 	
         </div>
    </body>
@@ -128,13 +128,13 @@ exports.upload = function(req,res) {
 //P486 Functions listAll, listByCat in handlers.js
 
 exports.listAll = function(req, res) {
-     console.log("Request handler â€˜listAll' was called."); 	
+     console.log("Request handler ListAll' was called."); 	
 
      readList(res,null);
 }
 
 exports.listByCat = function(req, res) {
-     console.log("Request handler â€˜listByCat' was called."); 	
+     console.log("Request handler ListByCat' was called."); 	
 
     var cat =  req.params.cat;
     readList(res,cat);
@@ -212,8 +212,8 @@ exports.delete = function(req, res) {
 var mongostr = {                			 // local machine
 		"hostname":"localhost", 
 		"port":27017, 
-		"username":â€œtom", 
-		"password":"1234",  
+		"username":"", 
+		"password":"",  
 		"name":"", 
 		"db":"course" 
 }
@@ -228,9 +228,12 @@ if(process.env.OPENSHIFT_NODEJS_PORT){   	// OpenShift
 	}
 }
 exports.getMongoUrl = function() {
-     return "mongodb://" + mongostr.username + ":" + 
-			mongostr.password + "@" + mongostr.hostname + ":" 
-			+ mongostr.port + "/" + mongostr.db; 
+   var obj=	mongostr;
+   if(obj.username && obj.password){ 
+     return "mongodb://" + obj.username + ":" + obj.password + "@" + obj.hostname + ":" + obj.port + "/" + obj.db; 
+   } else{ 
+      return "mongodb://" + obj.hostname + ":" + obj.port + "/" + obj.db; 
+   } 
 }
 
 //P492 Client-side Design Upload in index.html
@@ -247,7 +250,7 @@ exports.getMongoUrl = function() {
    </select> </p>
    <p>File Desc. : <input type="text" id="fileDesc" size="40"> </p> 
    <p>Select File: <input type="file" id="upload"></p>	
-   <p><input type="button" value="Upload File" onclick="uploadFile()â€?>
+   <p><input type="button" value="Upload File" onclick="uploadFile()">
     </p>	 
  </fieldset>	 
 </div>
@@ -279,7 +282,7 @@ xmlhttp =  new XMLHttpRequest();
     	 if(xmlhttp.readyState === 4){
        	  if(xmlhttp.status === 200){
 	     var json = JSON.parse(xmlhttp.responseText);				     
-                       var ihtm = getOneLi(json);				
+         var ihtm = getOneLi(json);				
    	     document.getElementById("listDiv").innerHTML += ihtm;
     	     document.getElementById("upload").value =null;
                fileDesc=document.getElementById("fileDesc").value=null; 
